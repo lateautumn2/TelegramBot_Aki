@@ -1,0 +1,21 @@
+# 用法：在同一目录放好 .env（参考 .env.example，并设置 TGBOT_IMAGE），然后：
+#   docker compose pull && docker compose up -d
+services:
+  tgbot:
+    image: ${TGBOT_IMAGE:?请在 .env 中设置 TGBOT_IMAGE，例如 ghcr.io/your-name/tgbot:latest}
+    container_name: tgbot
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # 覆盖 .env 里给本地运行用的 DATA_DIR
+      DATA_DIR: /data
+    volumes:
+      - ./data:/data
+    extra_hosts:
+      # 让容器里能用 host.docker.internal 访问宿主机上的代理
+      - "host.docker.internal:host-gateway"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
