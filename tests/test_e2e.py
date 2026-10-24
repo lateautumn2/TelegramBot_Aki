@@ -1,6 +1,9 @@
 """End-to-end: private chat, whitelists, groups and admin commands."""
 
 from datetime import datetime
+from types import SimpleNamespace
+
+import pytest
 
 from aiogram.methods import (
     AnswerCallbackQuery,
@@ -28,6 +31,7 @@ from helpers import (
 from bot.db.repo import Repo
 from bot.handlers.admin_acl import AclCb
 from bot.main import bootstrap_access
+from bot.middlewares import auth
 from bot.services.acl import AccessControl, Kind
 from bot.services.crypto import SecretBox
 from bot.services.llm import LLMError
@@ -58,13 +62,39 @@ async def test_env_whitelist_is_imported_only_once(tmp_path):
 # ---- private chat & whitelist ----
 
 
-async def test_stranger_is_denied_but_can_get_id(h):
+@pytest.mark.parametrize("now", [-10.0, 0.0, 5.0, 1000.0])
+async def test_stranger_is_denied_but_can_get_id(h, monkeypatch, now):
+    # Replace only this module's clock so asyncio and database timers keep running.
+    monkeypatch.setattr(auth, "time", SimpleNamespace(monotonic=lambda: now))
     await h.send(STRANGER, "hello")
     await h.send(STRANGER, "hello again")  # notice is rate limited
     await h.send(STRANGER, "/id")
     assert len(h.texts()) == 2
     assert "没有使用权限" in h.texts()[0] and str(STRANGER) in h.texts()[0]
     assert f"user_id: <code>{STRANGER}</code>" in h.texts()[1]
+    assert h.llm.calls == []
+
+
+async def test_denial_notice_cooldown_is_per_user_and_expires(h, monkeypatch):
+    now = 0.0
+    monkeypatch.setattr(auth, "time", SimpleNamespace(monotonic=lambda: now))
+    await h.send(STRANGER, "hello")
+    assert len(h.texts()) == 1 and str(STRANGER) in h.last_text()
+
+    now = 1.0
+    await h.send(STRANGER, "hello again")
+    assert len(h.texts()) == 1
+    await h.send(MEMBER, "hello")
+    assert len(h.texts()) == 2 and str(MEMBER) in h.last_text()
+
+    # Suppressed messages must not extend the original cooldown.
+    now = 600.0
+    await h.send(STRANGER, "still waiting")
+    assert len(h.texts()) == 2
+    now = 601.0
+    await h.send(STRANGER, "hello after cooldown")
+    assert len(h.texts()) == 3
+    assert "没有使用权限" in h.last_text() and str(STRANGER) in h.last_text()
     assert h.llm.calls == []
 
 

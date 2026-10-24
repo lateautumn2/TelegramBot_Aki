@@ -90,6 +90,8 @@ class AccessMiddleware(BaseMiddleware):
             return
         user_id = event.from_user.id
         now = time.monotonic()
-        if now - self._noticed.get(user_id, 0.0) > _NOTICE_COOLDOWN:
+        # The monotonic clock has an arbitrary origin; zero is not a valid
+        # sentinel for an unseen user. Always send their first denial notice.
+        if user_id not in self._noticed or now - self._noticed[user_id] > _NOTICE_COOLDOWN:
             self._noticed[user_id] = now
             await event.answer(f"你还没有使用权限。请把你的 ID 发给管理员：<code>{user_id}</code>")
